@@ -2,12 +2,20 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PoolBook – CRM for pool service pros</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0b4f5c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PoolBook">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
 :root{--bg:#eef6f7;--card:#fff;--ink:#0d2b33;--mute:#5b7780;--line:#d3e4e8;--aqua:#0aa5b8;--deep:#0b4f5c;--chip:#e0f1f4;--bad:#cf3f4f;--ok:#2a9d5c}
 @media(prefers-color-scheme:dark){:root{--bg:#0a1a1f;--card:#112a31;--ink:#e6f4f6;--mute:#8fb0b8;--line:#1f4048;--aqua:#2cc6d8;--deep:#7fdbe8;--chip:#173840}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
-header{background:#0b4f5c;color:#fff;padding:14px 16px}.top{display:flex;justify-content:space-between;align-items:center;max-width:860px;margin:auto}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif;padding:0 0 env(safe-area-inset-bottom)}
+header{background:#0b4f5c;color:#fff;padding:calc(14px + env(safe-area-inset-top)) 16px 14px}.top{display:flex;justify-content:space-between;align-items:center;max-width:860px;margin:auto}
 .logo{font-weight:800;font-size:22px}.logo span{color:#7fe3ef}
 main{max-width:860px;margin:auto;padding:16px 16px 60px}
 .card,.stop{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px}
@@ -22,9 +30,10 @@ dialog{border:0;border-radius:16px;padding:20px;width:min(560px,94vw);background
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.full{grid-column:1/-1}.row{display:flex;gap:8px;margin-top:14px}.row .btn{flex:1}
 .auth{max-width:380px;margin:50px auto}.auth input{margin-bottom:10px}.err{color:var(--bad);min-height:20px}.err.good{color:var(--ok)}
 .link{background:none;border:0;color:var(--aqua);font:600 14px system-ui;cursor:pointer;padding:6px}
+.tip{display:flex;gap:10px;align-items:center;background:var(--chip);color:var(--deep);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:14px}.tip img{width:36px;height:36px;border-radius:8px}.tip b{display:block}.tip .x{margin-left:auto;background:none;border:0;color:var(--deep);font-size:20px;cursor:pointer;padding:4px 8px}
 .log{border-top:1px solid var(--line);padding:8px 0;font-size:14px}
 </style></head><body>
-<header><div class="top"><div class="logo">Pool<span>Book</span></div><div id="hdr"></div></div></header>
+<header><div class="top"><div class="logo">Pool<span>Book</span></div><div style="display:flex;gap:8px"><button class="btn ghost" id="inst" hidden onclick="install()">Install app</button><div id="hdr"></div></div></div></header>
 <main id="main"></main>
 <dialog id="dlg"></dialog>
 <script>
@@ -95,7 +104,7 @@ function render(){
  const list=view==='route'?C.filter(c=>c.day===day):C;
  const nav=`<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn ${view==='route'?'':'ghost'}" onclick="view='route';render()">Route</button><button class="btn ${view==='all'?'':'ghost'}" onclick="view='all';render()">All customers</button><span style="flex:1"></span><button class="btn" onclick="openCust()">+ New customer</button></div>`;
  const days=view==='route'?`<div class="days">${DAYS.map(d=>`<button class="day ${d===day?'on':''}" onclick="day='${d}';render()"><b>${d}</b><br><small>${C.filter(c=>c.day===d).length} pools</small></button>`).join('')}</div>`:'';
- main.innerHTML=nav+days+(list.length?list.map(c=>{const v=lastV(c),dn=v?.d===today();return `<div class="stop ${dn?'done':''}" onclick="openCust(${c.id})"><div><h3>${dn?'✓ ':''}${esc(c.name)}</h3><p>${esc(c.addr)}</p><p>Gate: <b>${esc(c.gate)||'—'}</b>${v?` · Last: pH ${v.ph??'–'}, Cl ${v.fc??'–'}`:''}</p>${tags(c)}</div><button class="btn" onclick="event.stopPropagation();openLog(${c.id})">Log visit</button></div>`}).join(''):`<div class="card" style="text-align:center;color:var(--mute)">${view==='route'?'No pools on '+day+'.':'No customers yet.'} Add one with “New customer”.</div>`)}
+ main.innerHTML=iosTip()+nav+days+(list.length?list.map(c=>{const v=lastV(c),dn=v?.d===today();return `<div class="stop ${dn?'done':''}" onclick="openCust(${c.id})"><div><h3>${dn?'✓ ':''}${esc(c.name)}</h3><p>${esc(c.addr)}</p><p>Gate: <b>${esc(c.gate)||'—'}</b>${v?` · Last: pH ${v.ph??'–'}, Cl ${v.fc??'–'}`:''}</p>${tags(c)}</div><button class="btn" onclick="event.stopPropagation();openLog(${c.id})">Log visit</button></div>`}).join(''):`<div class="card" style="text-align:center;color:var(--mute)">${view==='route'?'No pools on '+day+'.':'No customers yet.'} Add one with “New customer”.</div>`)}
 function sel(n,o,v){return `<select id="${n}">${o.map(x=>`<option ${x==v?'selected':''}>${x}</option>`).join('')}</select>`}
 function openCust(id){
  const c=C.find(x=>x.id===id)||{day,san:'Chlorine',surf:'Plaster',visits:[]};
@@ -130,5 +139,15 @@ async function saveLog(id){
  const r=await sb.from('visits').insert({customer_id:id,fc:n('fc'),ph:n('ph'),ta:n('ta'),chem:$('chem').value,note:$('note').value});
  if(r.error)return alert(r.error.message);
  await sb.from('customers').update({last:today()}).eq('id',id);dlg.close();load()}
+// ===== Home-screen install =====
+const STANDALONE=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+const IOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+let deferredPrompt=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('inst').hidden=false});
+addEventListener('appinstalled',()=>{$('inst').hidden=true;deferredPrompt=null});
+async function install(){if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('inst').hidden=true}
+function tipSeen(){try{return localStorage.getItem('pb_tip')==='1'}catch(e){return false}}
+function hideTip(){try{localStorage.setItem('pb_tip','1')}catch(e){}const t=$('tip');if(t)t.remove()}
+function iosTip(){return IOS&&!STANDALONE&&!tipSeen()?`<div class="tip" id="tip"><img src="/apple-touch-icon.png" alt=""><div><b>Put PoolBook on your home screen</b>In Safari, tap Share (the square with an arrow), then “Add to Home Screen”.</div><button class="x" aria-label="Dismiss" onclick="hideTip()">×</button></div>`:''}
 boot();
 </script></body></html>
