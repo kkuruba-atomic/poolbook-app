@@ -20,7 +20,8 @@ input,select,textarea{width:100%;background:var(--card);color:var(--ink);border:
 label{font-size:13px;font-weight:600;color:var(--mute);display:block;margin-bottom:3px}
 dialog{border:0;border-radius:16px;padding:20px;width:min(560px,94vw);background:var(--bg);color:var(--ink)}dialog::backdrop{background:rgba(3,25,30,.6)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.full{grid-column:1/-1}.row{display:flex;gap:8px;margin-top:14px}.row .btn{flex:1}
-.auth{max-width:380px;margin:50px auto}.auth input{margin-bottom:10px}.err{color:var(--bad);min-height:20px}
+.auth{max-width:380px;margin:50px auto}.auth input{margin-bottom:10px}.err{color:var(--bad);min-height:20px}.err.good{color:var(--ok)}
+.link{background:none;border:0;color:var(--aqua);font:600 14px system-ui;cursor:pointer;padding:6px}
 .log{border-top:1px solid var(--line);padding:8px 0;font-size:14px}
 </style></head><body>
 <header><div class="top"><div class="logo">Pool<span>Book</span></div><div id="hdr"></div></div></header>
@@ -32,29 +33,55 @@ const SUPABASE_URL='https://tqntqxiqibgxzpnmirhh.supabase.co';
 const SUPABASE_KEY='sb_publishable_InWo3BZlgcGyNPazV0WPSA_aBCZ8lBx';
 const STRIPE_LINK='https://buy.stripe.com/test_00wcN752actaa6i1BA0x202';
 // =================================================================================================
+// Read the URL before Supabase processes it: a password-reset email link lands here with "type=recovery".
+let RECOVERY=location.hash.includes('type=recovery');
+const LINK_ERR=new URLSearchParams(location.hash.slice(1)).get('error_description');
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+sb.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY'){RECOVERY=true;newPwScreen()}});
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat'];
 let C=[],day=DAYS[Math.max(0,Math.min(5,(new Date().getDay()+6)%7))],view='route',user=null;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const today=()=>new Date().toISOString().slice(0,10);
+const clearHash=()=>history.replaceState(null,'',location.pathname);
 
 async function boot(){
+ if(LINK_ERR&&!RECOVERY){clearHash();return authScreen(LINK_ERR+'. Tap “Forgot password?” to get a new link.')}
  const{data:{session}}=await sb.auth.getSession();
+ if(RECOVERY&&session)return newPwScreen();
  if(!session)return authScreen();
  user=session.user;$('hdr').innerHTML=`<button class="btn ghost" onclick="sb.auth.signOut().then(()=>location.reload())">Sign out</button>`;
  const{data:p}=await sb.from('profiles').select('active').eq('id',user.id).maybeSingle();
  if(!p?.active)return paywall();
  await load();
 }
-function authScreen(msg=''){
- main.innerHTML=`<div class="card auth"><h2 style="margin-top:0">Log in to PoolBook</h2><input id="em" type="email" placeholder="Email" autocomplete="email"><input id="pw" type="password" placeholder="Password (6+ characters)" autocomplete="current-password"><div class="err" id="er">${msg}</div><div class="row"><button class="btn" onclick="auth('in')">Log in</button><button class="btn ghost" onclick="auth('up')">Create account</button></div></div>`}
+function authScreen(msg='',good=false){
+ $('hdr').innerHTML='';
+ main.innerHTML=`<div class="card auth"><h2 style="margin-top:0">Log in to PoolBook</h2><input id="em" type="email" placeholder="Email" autocomplete="email"><input id="pw" type="password" placeholder="Password (6+ characters)" autocomplete="current-password"><div class="err ${good?'good':''}" id="er">${esc(msg)}</div><div class="row"><button class="btn" onclick="auth('in')">Log in</button><button class="btn ghost" onclick="auth('up')">Create account</button></div><p style="text-align:center;margin:10px 0 0"><button class="link" onclick="forgot()">Forgot password?</button></p></div>`}
 async function auth(k){
  const email=$('em').value.trim(),password=$('pw').value;$('er').textContent='';
  const r=k==='in'?await sb.auth.signInWithPassword({email,password}):await sb.auth.signUp({email,password});
  if(r.error)return $('er').textContent=r.error.message;
- if(k==='up'&&!r.data.session)return authScreen('Check your email to confirm your account, then log in.');
+ if(k==='up'&&!r.data.session)return authScreen('Check your email to confirm your account, then log in.',true);
  boot()}
+async function forgot(){
+ const email=$('em').value.trim(),er=$('er');er.className='err';
+ if(!email){er.textContent='Type your email above, then tap “Forgot password?”.';return $('em').focus()}
+ er.textContent='Sending…';
+ const r=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin});
+ if(r.error)return er.textContent=r.error.message;
+ authScreen('If that email has a PoolBook account, a reset link is on its way. Check your inbox and spam folder.',true)}
+function newPwScreen(){
+ $('hdr').innerHTML='';
+ main.innerHTML=`<div class="card auth"><h2 style="margin-top:0">Set a new password</h2><input id="np" type="password" placeholder="New password (6+ characters)" autocomplete="new-password"><input id="np2" type="password" placeholder="Repeat new password" autocomplete="new-password"><div class="err" id="er"></div><div class="row"><button class="btn" onclick="setPw()">Save new password</button></div></div>`}
+async function setPw(){
+ const a=$('np').value,b=$('np2').value,er=$('er');
+ if(a.length<6)return er.textContent='Use at least 6 characters.';
+ if(a!==b)return er.textContent='Those two passwords don’t match.';
+ er.textContent='Saving…';
+ const r=await sb.auth.updateUser({password:a});
+ if(r.error)return er.textContent=r.error.message;
+ RECOVERY=false;clearHash();boot()}
 function paywall(){
  main.innerHTML=`<div class="card auth" style="text-align:center"><h2 style="margin-top:0">Activate your account</h2><p>PoolBook is $40/month. Subscribe, then your account is switched on within one business day.</p><p style="color:var(--mute);font-size:14px">Signed in as ${esc(user.email)}</p><a class="btn" style="display:inline-block;text-decoration:none" href="${STRIPE_LINK}?prefilled_email=${encodeURIComponent(user.email)}">Subscribe – $40/mo</a><p><button class="btn ghost" onclick="boot()">I've subscribed – refresh</button></p></div>`}
 
