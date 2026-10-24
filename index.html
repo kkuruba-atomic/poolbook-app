@@ -58,9 +58,10 @@ async function boot(){
  if(LINK_ERR&&!RECOVERY){clearHash();return authScreen(LINK_ERR+'. Tap “Forgot password?” to get a new link.')}
  const{data:{session}}=await sb.auth.getSession();
  if(RECOVERY&&session)return newPwScreen();
- if(!session)return authScreen();
+ if(!session)return navigator.onLine?authScreen():offlineScreen();
  user=session.user;$('hdr').innerHTML=`<button class="btn ghost" onclick="sb.auth.signOut().then(()=>location.reload())">Sign out</button>`;
- const{data:p}=await sb.from('profiles').select('active').eq('id',user.id).maybeSingle();
+ const{data:p,error:pe}=await sb.from('profiles').select('active').eq('id',user.id).maybeSingle();
+ if(pe)return offlineScreen();
  if(!p?.active)return paywall();
  await load();
 }
@@ -91,12 +92,15 @@ async function setPw(){
  const r=await sb.auth.updateUser({password:a});
  if(r.error)return er.textContent=r.error.message;
  RECOVERY=false;clearHash();boot()}
+function offlineScreen(){
+ main.innerHTML=`<div class="card auth" style="text-align:center"><div style="font-size:40px">📶</div><h2 style="margin:6px 0">No signal right now</h2><p style="color:var(--mute)">PoolBook needs a connection to load your customers. It will reload on its own when signal comes back.</p><button class="btn" onclick="boot()">Try again</button></div>`}
+addEventListener('online',()=>{if(main.querySelector('.auth h2')?.textContent==='No signal right now')boot()});
 function paywall(){
  main.innerHTML=`<div class="card auth" style="text-align:center"><h2 style="margin-top:0">Activate your account</h2><p>PoolBook is $40/month. Subscribe, then your account is switched on within one business day.</p><p style="color:var(--mute);font-size:14px">Signed in as ${esc(user.email)}</p><a class="btn" style="display:inline-block;text-decoration:none" href="${STRIPE_LINK}?prefilled_email=${encodeURIComponent(user.email)}">Subscribe – $40/mo</a><p><button class="btn ghost" onclick="boot()">I've subscribed – refresh</button></p></div>`}
 
 async function load(){
  const{data,error}=await sb.from('customers').select('*, visits(d,fc,ph,ta,chem,note)').order('name');
- if(error)return main.innerHTML=`<div class="card">Could not load data: ${esc(error.message)}</div>`;
+ if(error)return navigator.onLine?main.innerHTML=`<div class="card">Could not load data: ${esc(error.message)}</div>`:offlineScreen();
  C=data.map(c=>({...c,visits:(c.visits||[]).sort((a,b)=>b.d.localeCompare(a.d))}));render()}
 const lastV=c=>c.visits[0];
 const tags=c=>`<span class="tag">${esc(c.san)}</span><span class="tag">${esc(c.surf)}</span><span class="tag">${(+c.gal||0).toLocaleString()} gal</span>${c.dog?'<span class="tag alert">🐕 Dog on site</span>':''}`;
@@ -149,5 +153,6 @@ async function install(){if(!deferredPrompt)return;deferredPrompt.prompt();await
 function tipSeen(){try{return localStorage.getItem('pb_tip')==='1'}catch(e){return false}}
 function hideTip(){try{localStorage.setItem('pb_tip','1')}catch(e){}const t=$('tip');if(t)t.remove()}
 function iosTip(){return IOS&&!STANDALONE&&!tipSeen()?`<div class="tip" id="tip"><img src="/apple-touch-icon.png" alt=""><div><b>Put PoolBook on your home screen</b>In Safari, tap Share (the square with an arrow), then “Add to Home Screen”.</div><button class="x" aria-label="Dismiss" onclick="hideTip()">×</button></div>`:''}
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 boot();
 </script></body></html>
