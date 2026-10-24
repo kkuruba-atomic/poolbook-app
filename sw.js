@@ -1,7 +1,7 @@
 // PoolBook service worker: keeps a copy of the app on the phone so it opens with no signal.
 // Customer data is NOT cached here; it always comes live from Supabase.
 // Bump VERSION whenever you want phones to drop the old saved copy.
-const VERSION = 'poolbook-v1';
+const VERSION = 'poolbook-v2';
 const APP_FILES = [
   '/',
   '/index.html',

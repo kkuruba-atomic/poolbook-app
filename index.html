@@ -31,6 +31,9 @@ dialog{border:0;border-radius:16px;padding:20px;width:min(560px,94vw);background
 .auth{max-width:380px;margin:50px auto}.auth input{margin-bottom:10px}.err{color:var(--bad);min-height:20px}.err.good{color:var(--ok)}
 .link{background:none;border:0;color:var(--aqua);font:600 14px system-ui;cursor:pointer;padding:6px}
 .tip{display:flex;gap:10px;align-items:center;background:var(--chip);color:var(--deep);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:14px}.tip img{width:36px;height:36px;border-radius:8px}.tip b{display:block}.tip .x{margin-left:auto;background:none;border:0;color:var(--deep);font-size:20px;cursor:pointer;padding:4px 8px}
+.tip.off{background:#fff4dc;color:#6b4a00}@media(prefers-color-scheme:dark){.tip.off{background:#3a2e10;color:#ffd98a}}
+.note{background:#fff4dc;color:#6b4a00;border-radius:10px;padding:8px 10px;font-size:14px;margin-bottom:10px}@media(prefers-color-scheme:dark){.note{background:#3a2e10;color:#ffd98a}}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 .log{border-top:1px solid var(--line);padding:8px 0;font-size:14px}
 </style></head><body>
 <header><div class="top"><div class="logo">Pool<span>Book</span></div><div style="display:flex;gap:8px"><button class="btn ghost" id="inst" hidden onclick="install()">Install app</button><div id="hdr"></div></div></div></header>
@@ -58,11 +61,11 @@ async function boot(){
  if(LINK_ERR&&!RECOVERY){clearHash();return authScreen(LINK_ERR+'. Tap “Forgot password?” to get a new link.')}
  const{data:{session}}=await sb.auth.getSession();
  if(RECOVERY&&session)return newPwScreen();
- if(!session)return navigator.onLine?authScreen():offlineScreen();
- user=session.user;$('hdr').innerHTML=`<button class="btn ghost" onclick="sb.auth.signOut().then(()=>location.reload())">Sign out</button>`;
+ if(!session)return navigator.onLine?authScreen():goOffline(lastId());
+ user=session.user;signOutBtn();
  const{data:p,error:pe}=await sb.from('profiles').select('active').eq('id',user.id).maybeSingle();
- if(pe)return offlineScreen();
- if(!p?.active)return paywall();
+ if(pe)return goOffline(user.id);
+ if(!p?.active){wipeCache();return paywall()}
  await load();
 }
 function authScreen(msg='',good=false){
@@ -92,27 +95,46 @@ async function setPw(){
  const r=await sb.auth.updateUser({password:a});
  if(r.error)return er.textContent=r.error.message;
  RECOVERY=false;clearHash();boot()}
+// ===== Saved copy for no-signal use (one account per phone; wiped on sign-out) =====
+let OFFLINE=false,CACHED_AT=0;
+const CK=id=>'pb_cache_'+id;
+function lastId(){try{return localStorage.getItem('pb_last')}catch(e){return null}}
+function saveCache(){try{localStorage.setItem(CK(user.id),JSON.stringify({at:Date.now(),email:user.email,C}));localStorage.setItem('pb_last',user.id)}catch(e){}}
+function readCache(id){try{return id?JSON.parse(localStorage.getItem(CK(id))||'null'):null}catch(e){return null}}
+function wipeCache(){try{Object.keys(localStorage).filter(k=>k.startsWith('pb_cache_')||k==='pb_last').forEach(k=>localStorage.removeItem(k))}catch(e){}}
+function goOffline(id){const c=readCache(id);if(!c)return offlineScreen();
+ OFFLINE=true;CACHED_AT=c.at;C=c.C;if(!user)user={id,email:c.email};signOutBtn();render()}
+const isNetErr=e=>!navigator.onLine||/fetch|load failed|network/i.test(e?.message||'');
+function signOutBtn(){$('hdr').innerHTML=`<button class="btn ghost" onclick="signOut()">Sign out</button>`}
+async function signOut(){wipeCache();
+ const r=await sb.auth.signOut().catch(e=>({error:e}));
+ if(r?.error)try{Object.keys(localStorage).filter(k=>k.startsWith('sb-')).forEach(k=>localStorage.removeItem(k))}catch(e){} // offline: forget the login on this phone
+ location.reload()}
+function savedWhen(){const d=new Date(CACHED_AT),t=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+ return d.toDateString()===new Date().toDateString()?t:d.toLocaleDateString([],{month:'short',day:'numeric'})+' at '+t}
+const offNote=()=>OFFLINE?`<div class="note">📶 You’re offline. You can look at everything, but saving waits until you have signal.</div>`:'';
 function offlineScreen(){
  main.innerHTML=`<div class="card auth" style="text-align:center"><div style="font-size:40px">📶</div><h2 style="margin:6px 0">No signal right now</h2><p style="color:var(--mute)">PoolBook needs a connection to load your customers. It will reload on its own when signal comes back.</p><button class="btn" onclick="boot()">Try again</button></div>`}
-addEventListener('online',()=>{if(main.querySelector('.auth h2')?.textContent==='No signal right now')boot()});
+addEventListener('online',()=>{if(OFFLINE||main.querySelector('.auth h2')?.textContent==='No signal right now'){OFFLINE=false;boot()}});
 function paywall(){
  main.innerHTML=`<div class="card auth" style="text-align:center"><h2 style="margin-top:0">Activate your account</h2><p>PoolBook is $40/month. Subscribe, then your account is switched on within one business day.</p><p style="color:var(--mute);font-size:14px">Signed in as ${esc(user.email)}</p><a class="btn" style="display:inline-block;text-decoration:none" href="${STRIPE_LINK}?prefilled_email=${encodeURIComponent(user.email)}">Subscribe – $40/mo</a><p><button class="btn ghost" onclick="boot()">I've subscribed – refresh</button></p></div>`}
 
 async function load(){
  const{data,error}=await sb.from('customers').select('*, visits(d,fc,ph,ta,chem,note)').order('name');
- if(error)return navigator.onLine?main.innerHTML=`<div class="card">Could not load data: ${esc(error.message)}</div>`:offlineScreen();
- C=data.map(c=>({...c,visits:(c.visits||[]).sort((a,b)=>b.d.localeCompare(a.d))}));render()}
+ if(error)return isNetErr(error)?goOffline(user.id):main.innerHTML=`<div class="card">Could not load data: ${esc(error.message)}</div>`;
+ OFFLINE=false;C=data.map(c=>({...c,visits:(c.visits||[]).sort((a,b)=>b.d.localeCompare(a.d))}));saveCache();render()}
 const lastV=c=>c.visits[0];
 const tags=c=>`<span class="tag">${esc(c.san)}</span><span class="tag">${esc(c.surf)}</span><span class="tag">${(+c.gal||0).toLocaleString()} gal</span>${c.dog?'<span class="tag alert">🐕 Dog on site</span>':''}`;
 function render(){
  const list=view==='route'?C.filter(c=>c.day===day):C;
  const nav=`<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn ${view==='route'?'':'ghost'}" onclick="view='route';render()">Route</button><button class="btn ${view==='all'?'':'ghost'}" onclick="view='all';render()">All customers</button><span style="flex:1"></span><button class="btn" onclick="openCust()">+ New customer</button></div>`;
  const days=view==='route'?`<div class="days">${DAYS.map(d=>`<button class="day ${d===day?'on':''}" onclick="day='${d}';render()"><b>${d}</b><br><small>${C.filter(c=>c.day===d).length} pools</small></button>`).join('')}</div>`:'';
- main.innerHTML=iosTip()+nav+days+(list.length?list.map(c=>{const v=lastV(c),dn=v?.d===today();return `<div class="stop ${dn?'done':''}" onclick="openCust(${c.id})"><div><h3>${dn?'✓ ':''}${esc(c.name)}</h3><p>${esc(c.addr)}</p><p>Gate: <b>${esc(c.gate)||'—'}</b>${v?` · Last: pH ${v.ph??'–'}, Cl ${v.fc??'–'}`:''}</p>${tags(c)}</div><button class="btn" onclick="event.stopPropagation();openLog(${c.id})">Log visit</button></div>`}).join(''):`<div class="card" style="text-align:center;color:var(--mute)">${view==='route'?'No pools on '+day+'.':'No customers yet.'} Add one with “New customer”.</div>`)}
+ const off=OFFLINE?`<div class="tip off"><div style="font-size:22px">📶</div><div><b>Offline</b>Showing your list as saved ${savedWhen()}. Changes can’t be saved until you have signal.</div><button class="btn ghost" style="margin-left:auto" onclick="OFFLINE=false;boot()">Retry</button></div>`:'';
+ main.innerHTML=off+iosTip()+nav+days+(list.length?list.map(c=>{const v=lastV(c),dn=v?.d===today();return `<div class="stop ${dn?'done':''}" onclick="openCust(${c.id})"><div><h3>${dn?'✓ ':''}${esc(c.name)}</h3><p>${esc(c.addr)}</p><p>Gate: <b>${esc(c.gate)||'—'}</b>${v?` · Last: pH ${v.ph??'–'}, Cl ${v.fc??'–'}`:''}</p>${tags(c)}</div><button class="btn" onclick="event.stopPropagation();openLog(${c.id})">Log visit</button></div>`}).join(''):`<div class="card" style="text-align:center;color:var(--mute)">${view==='route'?'No pools on '+day+'.':'No customers yet.'} Add one with “New customer”.</div>`)}
 function sel(n,o,v){return `<select id="${n}">${o.map(x=>`<option ${x==v?'selected':''}>${x}</option>`).join('')}</select>`}
 function openCust(id){
  const c=C.find(x=>x.id===id)||{day,san:'Chlorine',surf:'Plaster',visits:[]};
- dlg.innerHTML=`<h2 style="margin-top:0">${id?'Edit':'New'} customer</h2><div class="grid">
+ dlg.innerHTML=`<h2 style="margin-top:0">${id?'Edit':'New'} customer</h2>${offNote()}<div class="grid">
  <div class="full"><label>Name</label><input id="name" value="${esc(c.name)}"></div>
  <div><label>Phone</label><input id="phone" type="tel" value="${esc(c.phone)}"></div><div><label>Monthly rate ($)</label><input id="rate" type="number" value="${esc(c.rate)}"></div>
  <div class="full"><label>Service address</label><input id="addr" value="${esc(c.addr)}"></div>
@@ -123,25 +145,25 @@ function openCust(id){
  <div class="full"><label><input type="checkbox" id="dog" style="width:auto" ${c.dog?'checked':''}> 🐕 Dog on site</label></div>
  <div class="full"><label>Notes</label><textarea id="notes" rows="2">${esc(c.notes)}</textarea></div></div>
  ${id&&c.visits.length?`<h3>Visit history</h3>${c.visits.slice(0,8).map(v=>`<div class="log"><b>${v.d}</b> · Cl ${v.fc??'–'} · pH ${v.ph??'–'} · TA ${v.ta??'–'}${v.chem?`<br>Added: ${esc(v.chem)}`:''}${v.note?`<br>${esc(v.note)}`:''}</div>`).join('')}`:''}
- <div class="row"><button class="btn ghost" onclick="dlg.close()">Cancel</button>${id?`<button class="btn ghost" onclick="delCust(${id})">Delete</button>`:''}<button class="btn" onclick="saveCust(${id||0})">Save</button></div>`;
+ <div class="row"><button class="btn ghost" onclick="dlg.close()">Cancel</button>${id?`<button class="btn ghost" onclick="delCust(${id})" ${OFFLINE?'disabled':''}>Delete</button>`:''}<button class="btn" onclick="saveCust(${id||0})" ${OFFLINE?'disabled':''}>Save</button></div><div class="err" id="dlgErr"></div>`;
  dlg.showModal()}
 async function saveCust(id){
  const g=k=>$(k).value;if(!g('name').trim())return $('name').focus();
  const o={name:g('name').trim(),phone:g('phone'),addr:g('addr'),gate:g('gate'),day:g('day'),rate:+g('rate')||0,san:g('san'),surf:g('surf'),gal:+g('gal')||0,equip:g('equip'),dog:$('dog').checked,notes:g('notes')};
  const r=id?await sb.from('customers').update(o).eq('id',id):await sb.from('customers').insert(o);
- if(r.error)return alert(r.error.message);dlg.close();load()}
-async function delCust(id){if(!confirm('Delete this customer and their visit history?'))return;const r=await sb.from('customers').delete().eq('id',id);if(r.error)return alert(r.error.message);dlg.close();load()}
+ if(r.error)return isNetErr(r.error)?$('dlgErr').textContent='No signal, so this wasn’t saved. Keep this open and tap Save again when you have signal.':alert(r.error.message);dlg.close();load()}
+async function delCust(id){if(!confirm('Delete this customer and their visit history?'))return;const r=await sb.from('customers').delete().eq('id',id);if(r.error)return isNetErr(r.error)?$('dlgErr').textContent='No signal, so this wasn’t saved. Keep this open and tap Save again when you have signal.':alert(r.error.message);dlg.close();load()}
 function openLog(id){const c=C.find(x=>x.id===id);
- dlg.innerHTML=`<h2 style="margin-top:0">Log visit</h2><p style="color:var(--mute)">${esc(c.name)} · ${esc(c.addr)}</p><div class="grid">
+ dlg.innerHTML=`<h2 style="margin-top:0">Log visit</h2><p style="color:var(--mute)">${esc(c.name)} · ${esc(c.addr)}</p>${offNote()}<div class="grid">
  <div><label>Free chlorine (ppm)</label><input id="fc" type="number" step=".1" inputmode="decimal"></div><div><label>pH</label><input id="ph" type="number" step=".1" inputmode="decimal"></div>
  <div class="full"><label>Alkalinity (ppm)</label><input id="ta" type="number" inputmode="decimal"></div>
  <div class="full"><label>Chemicals added</label><input id="chem" placeholder="e.g. 1 gal liquid chlorine"></div>
  <div class="full"><label>Notes</label><textarea id="note" rows="2"></textarea></div></div>
- <div class="row"><button class="btn ghost" onclick="dlg.close()">Cancel</button><button class="btn" onclick="saveLog(${id})">Save visit</button></div>`;dlg.showModal()}
+ <div class="row"><button class="btn ghost" onclick="dlg.close()">Cancel</button><button class="btn" onclick="saveLog(${id})" ${OFFLINE?'disabled':''}>Save visit</button></div><div class="err" id="dlgErr"></div>`;dlg.showModal()}
 async function saveLog(id){
  const n=k=>$(k).value===''?null:+$(k).value;
  const r=await sb.from('visits').insert({customer_id:id,fc:n('fc'),ph:n('ph'),ta:n('ta'),chem:$('chem').value,note:$('note').value});
- if(r.error)return alert(r.error.message);
+ if(r.error)return isNetErr(r.error)?$('dlgErr').textContent='No signal, so this wasn’t saved. Keep this open and tap Save again when you have signal.':alert(r.error.message);
  await sb.from('customers').update({last:today()}).eq('id',id);dlg.close();load()}
 // ===== Home-screen install =====
 const STANDALONE=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
