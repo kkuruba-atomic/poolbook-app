@@ -1,7 +1,7 @@
 // PoolBook service worker: keeps a copy of the app on the phone so it opens with no signal.
 // Customer data is NOT cached here; it always comes live from Supabase.
 // Bump VERSION whenever you want phones to drop the old saved copy.
-const VERSION = 'poolbook-v2';
+const VERSION = 'poolbook-v3';
 const APP_FILES = [
   '/',
   '/index.html',
@@ -13,7 +13,11 @@ const APP_FILES = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(APP_FILES)).then(() => self.skipWaiting()));
+  // Save each file on its own, so one missing file (e.g. an icon) can't stop offline mode from installing.
+  // The page itself must be saved, though; without it there's nothing to open offline.
+  e.waitUntil(caches.open(VERSION).then(c => Promise.all(APP_FILES.map(f =>
+    c.add(f).catch(err => { if (f === '/' || f === '/index.html') throw err; })
+  ))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
