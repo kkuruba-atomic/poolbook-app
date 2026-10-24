@@ -1,7 +1,7 @@
 // PoolBook service worker: keeps a copy of the app on the phone so it opens with no signal.
 // Customer data is NOT cached here; it always comes live from Supabase.
 // Bump VERSION whenever you want phones to drop the old saved copy.
-const VERSION = 'poolbook-v3';
+const VERSION = 'poolbook-v4';
 const APP_FILES = [
   '/',
   '/index.html',
@@ -33,20 +33,21 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;                       // never touch saves
   const url = new URL(req.url);
   if (url.hostname.endsWith('supabase.co')) return;       // never cache customer data or logins
+  if (url.pathname === '/sw.js') return;                   // let the browser check for updates normally
 
   // The page itself: try the network first so updates show up right away; fall back to the saved copy offline.
   if (req.mode === 'navigate') {
     e.respondWith(
       fetch(req)
         .then(res => { const copy = res.clone(); caches.open(VERSION).then(c => c.put('/index.html', copy)); return res; })
-        .catch(() => caches.match('/index.html'))
+        .catch(() => caches.match('/index.html', { ignoreVary: true }))
     );
     return;
   }
 
   // Icons, manifest and the Supabase library: use the saved copy, fetch and save it if missing.
   e.respondWith(
-    caches.match(req).then(hit => hit || fetch(req).then(res => {
+    caches.match(req, { ignoreVary: true }).then(hit => hit || fetch(req).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
       return res;
     }))

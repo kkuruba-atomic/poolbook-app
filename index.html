@@ -37,7 +37,7 @@ dialog{border:0;border-radius:16px;padding:20px;width:min(560px,94vw);background
 .log{border-top:1px solid var(--line);padding:8px 0;font-size:14px}
 </style></head><body>
 <header><div class="top"><div class="logo">Pool<span>Book</span></div><div style="display:flex;gap:8px"><button class="btn ghost" id="inst" hidden onclick="install()">Install app</button><div id="hdr"></div></div></div></header>
-<main id="main"></main>
+<main id="main"><p style="text-align:center;color:var(--mute);margin-top:60px">Loading PoolBook…</p></main>
 <dialog id="dlg"></dialog>
 <script>
 // ===== CONFIG (these two values are public by design; security comes from the database rules) =====
@@ -48,8 +48,8 @@ const STRIPE_LINK='https://buy.stripe.com/test_00wcN752actaa6i1BA0x202';
 // Read the URL before Supabase processes it: a password-reset email link lands here with "type=recovery".
 let RECOVERY=location.hash.includes('type=recovery');
 const LINK_ERR=new URLSearchParams(location.hash.slice(1)).get('error_description');
-const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-sb.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY'){RECOVERY=true;newPwScreen()}});
+const sb=window.supabase?supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
+sb?.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY'){RECOVERY=true;newPwScreen()}});
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat'];
 let C=[],day=DAYS[Math.max(0,Math.min(5,(new Date().getDay()+6)%7))],view='route',user=null;
 const $=id=>document.getElementById(id);
@@ -59,7 +59,11 @@ const clearHash=()=>history.replaceState(null,'',location.pathname);
 
 async function boot(){
  if(LINK_ERR&&!RECOVERY){clearHash();return authScreen(LINK_ERR+'. Tap “Forgot password?” to get a new link.')}
- const{data:{session}}=await sb.auth.getSession();
+ if(!sb||!navigator.onLine)return goOffline(lastId());
+ // with weak signal, don't wait forever: after 5 seconds fall back to the saved copy
+ const res=await Promise.race([sb.auth.getSession(),new Promise(r=>setTimeout(()=>r(null),5000))]);
+ if(!res)return goOffline(lastId());
+ const session=res.data?.session;
  if(RECOVERY&&session)return newPwScreen();
  if(!session)return navigator.onLine?authScreen():goOffline(lastId());
  user=session.user;signOutBtn();
@@ -107,7 +111,7 @@ function goOffline(id){const c=readCache(id);if(!c)return offlineScreen();
 const isNetErr=e=>!navigator.onLine||/fetch|load failed|network/i.test(e?.message||'');
 function signOutBtn(){$('hdr').innerHTML=`<button class="btn ghost" onclick="signOut()">Sign out</button>`}
 async function signOut(){wipeCache();
- const r=await sb.auth.signOut().catch(e=>({error:e}));
+ const r=sb&&navigator.onLine?await sb.auth.signOut().catch(e=>({error:e})):{error:1};
  if(r?.error)try{Object.keys(localStorage).filter(k=>k.startsWith('sb-')).forEach(k=>localStorage.removeItem(k))}catch(e){} // offline: forget the login on this phone
  location.reload()}
 function savedWhen(){const d=new Date(CACHED_AT),t=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
@@ -115,7 +119,7 @@ function savedWhen(){const d=new Date(CACHED_AT),t=d.toLocaleTimeString([],{hour
 const offNote=()=>OFFLINE?`<div class="note">📶 You’re offline. You can look at everything, but saving waits until you have signal.</div>`:'';
 function offlineScreen(){
  main.innerHTML=`<div class="card auth" style="text-align:center"><div style="font-size:40px">📶</div><h2 style="margin:6px 0">No signal right now</h2><p style="color:var(--mute)">PoolBook needs a connection to load your customers. It will reload on its own when signal comes back.</p><button class="btn" onclick="boot()">Try again</button></div>`}
-addEventListener('online',()=>{if(OFFLINE||main.querySelector('.auth h2')?.textContent==='No signal right now'){OFFLINE=false;boot()}});
+addEventListener('online',()=>{if(OFFLINE||main.querySelector('.auth h2')?.textContent==='No signal right now'){OFFLINE=false;sb?boot():location.reload()}});
 function paywall(){
  main.innerHTML=`<div class="card auth" style="text-align:center"><h2 style="margin-top:0">Activate your account</h2><p>PoolBook is $40/month. Subscribe, then your account is switched on within one business day.</p><p style="color:var(--mute);font-size:14px">Signed in as ${esc(user.email)}</p><a class="btn" style="display:inline-block;text-decoration:none" href="${STRIPE_LINK}?prefilled_email=${encodeURIComponent(user.email)}">Subscribe – $40/mo</a><p><button class="btn ghost" onclick="boot()">I've subscribed – refresh</button></p></div>`}
 
@@ -129,7 +133,7 @@ function render(){
  const list=view==='route'?C.filter(c=>c.day===day):C;
  const nav=`<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn ${view==='route'?'':'ghost'}" onclick="view='route';render()">Route</button><button class="btn ${view==='all'?'':'ghost'}" onclick="view='all';render()">All customers</button><span style="flex:1"></span><button class="btn" onclick="openCust()">+ New customer</button></div>`;
  const days=view==='route'?`<div class="days">${DAYS.map(d=>`<button class="day ${d===day?'on':''}" onclick="day='${d}';render()"><b>${d}</b><br><small>${C.filter(c=>c.day===d).length} pools</small></button>`).join('')}</div>`:'';
- const off=OFFLINE?`<div class="tip off"><div style="font-size:22px">📶</div><div><b>Offline</b>Showing your list as saved ${savedWhen()}. Changes can’t be saved until you have signal.</div><button class="btn ghost" style="margin-left:auto" onclick="OFFLINE=false;boot()">Retry</button></div>`:'';
+ const off=OFFLINE?`<div class="tip off"><div style="font-size:22px">📶</div><div><b>Offline</b>Showing your list as saved ${savedWhen()}. Changes can’t be saved until you have signal.</div><button class="btn ghost" style="margin-left:auto" onclick="if(!sb)return location.reload();OFFLINE=false;boot()">Retry</button></div>`:'';
  main.innerHTML=off+iosTip()+nav+days+(list.length?list.map(c=>{const v=lastV(c),dn=v?.d===today();return `<div class="stop ${dn?'done':''}" onclick="openCust(${c.id})"><div><h3>${dn?'✓ ':''}${esc(c.name)}</h3><p>${esc(c.addr)}</p><p>Gate: <b>${esc(c.gate)||'—'}</b>${v?` · Last: pH ${v.ph??'–'}, Cl ${v.fc??'–'}`:''}</p>${tags(c)}</div><button class="btn" onclick="event.stopPropagation();openLog(${c.id})">Log visit</button></div>`}).join(''):`<div class="card" style="text-align:center;color:var(--mute)">${view==='route'?'No pools on '+day+'.':'No customers yet.'} Add one with “New customer”.</div>`)}
 function sel(n,o,v){return `<select id="${n}">${o.map(x=>`<option ${x==v?'selected':''}>${x}</option>`).join('')}</select>`}
 function openCust(id){
